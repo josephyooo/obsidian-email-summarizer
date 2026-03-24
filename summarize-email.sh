@@ -23,11 +23,11 @@ MAIL_MAILBOX="${MAIL_MAILBOX:-INBOX}"
 MAIL_SINCE_DAYS="${MAIL_SINCE_DAYS:-1}"
 VAULT_PATH="${VAULT_PATH:?Error: VAULT_PATH is required in .env}"
 SOURCES_DIR="${SOURCES_DIR:-sources}"
-CLAUDE_MODEL="${CLAUDE_MODEL:-haiku}"
-claude_args=(--model "$CLAUDE_MODEL" --no-session-persistence)
-if [[ -n "${CLAUDE_MAX_BUDGET:-}" ]]; then
-  claude_args+=(--max-budget-usd "$CLAUDE_MAX_BUDGET")
-fi
+# LLM command: receives prompt on stdin, writes summary to stdout
+# Examples:
+#   claude --model claude-haiku-4-5-20251001 --effort medium --no-session-persistence -p
+#   pi --model gpt-5.4-mini --provider openai-codex --thinking medium --no-session --no-themes -p
+LLM_CMD="${LLM_CMD:-claude --model claude-haiku-4-5-20251001 --effort medium --no-session-persistence -p}"
 
 TODAY="$(date +%Y-%m-%d)"
 SINCE_DATE="$(date -v-"${MAIL_SINCE_DAYS}"d +%Y-%m-%d)"
@@ -36,7 +36,8 @@ OUTPUT_FILE="$OUTPUT_DIR/email-summary-$TODAY.md"
 
 # --- Phase 1: Preflight checks ---
 
-for cmd in mail-app-cli claude jq; do
+llm_bin="$(echo "$LLM_CMD" | awk '{print $1}')"
+for cmd in mail-app-cli "$llm_bin" jq; do
   if ! command -v "$cmd" &>/dev/null; then
     echo "Error: '$cmd' not found in PATH. Run install.sh or install it manually." >&2
     exit 1
@@ -123,11 +124,11 @@ formatted="$(echo "$all_emails" | jq -r '
   "---\nFrom: \(.Sender // "unknown")\nSubject: \(.Subject // "no subject")\nDate: \(.DateReceived // .DateSent // "unknown")\nAccount: \(.Account // "unknown")\n\n\($trimmed)\n"
 ')"
 
-echo "Summarizing with Claude ($CLAUDE_MODEL)..."
+echo "Summarizing with: $LLM_CMD"
 
 prompt="$(cat "$SCRIPT_DIR/prompts/summarize.txt")"
 
-summary="$(printf '%s\n\n%s' "$prompt" "$formatted" | claude -p "${claude_args[@]}" 2>/dev/null)"
+summary="$(printf '%s\n\n%s' "$prompt" "$formatted" | $LLM_CMD 2>/dev/null)"
 
 # --- Phase 5: Write output ---
 
