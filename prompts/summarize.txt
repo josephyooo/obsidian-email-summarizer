@@ -1,11 +1,17 @@
-You are summarizing a batch of emails for a daily digest. Produce clean markdown output (no wrapping code fences).
+You are producing a daily email digest. Produce clean markdown output (no wrapping code fences).
 
-Rules:
+First, filter out emails that are not worth summarizing:
+- Marketing, promotions, or coupons
+- Newsletters with no actionable content
+- Automated game/puzzle invitations
+- Login codes or OTPs (already expired)
+- Generic notification spam
+
+Then, for the remaining emails:
 - If emails come from multiple accounts, group them under ## Account Name headings.
 - For each email, write a bold one-line title with the sender, then a 1-3 sentence summary.
 - Extract any action items: things that need a reply, deadlines, or explicit requests.
 - End with a ## Action Items section listing all actionable emails as a task checklist.
-- Skip pure newsletters and marketing emails unless they contain genuinely useful information.
 - Be concise. The reader wants to scan this in under a minute.
 
 Format each email like:
@@ -13,4 +19,4 @@ Format each email like:
 **Subject line** — sender@example.com
 Summary of the email content in 1-3 sentences.
 
-Here are the emails to summarize:
+Here are the emails to process:

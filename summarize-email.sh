@@ -93,54 +93,27 @@ fi
 
 echo "Found $total_count email(s) total."
 
-# --- Phase 3: Screen emails (pass 1) ---
+# --- Phase 3: Fetch content (parallel) ---
 
-echo "Screening for relevant emails..."
-
-subjects="$(echo "$all_headers" | jq -r '
-  .[] |
-  "ID: \(.ID) | Account: \(.Account) | From: \(.Sender // "unknown") | Subject: \(.Subject // "no subject")"
-')"
-
-screen_prompt="$(cat "$SCRIPT_DIR/prompts/screen.txt")"
-
-selected_ids="$(printf '%s\n\n%s' "$screen_prompt" "$subjects" | claude -p \
-  "${claude_args[@]}" 2>/dev/null)"
-
-# Parse the JSON array of IDs — strip markdown fences and normalize to strings
-selected_ids="$(echo "$selected_ids" \
-  | sed 's/^```json//; s/^```//' \
-  | jq -r '.[] | tostring' 2>/dev/null || echo "")"
-
-if [[ -z "$selected_ids" ]]; then
-  echo "No relevant emails found after screening."
-  exit 0
-fi
-
-selected_count="$(echo "$selected_ids" | wc -l | xargs)"
-echo "Selected $selected_count of $total_count email(s) for full summarization."
-
-# --- Phase 4: Fetch content for selected emails only ---
-
-echo "Fetching content for selected emails..."
+echo "Fetching content for $total_count email(s)..."
 
 tmpdir="$(mktemp -d)"
 trap 'rm -rf "$tmpdir"' EXIT
 
-while IFS= read -r msg_id; do
-  account="$(echo "$all_headers" | jq -r --arg id "$msg_id" '.[] | select(.ID == $id) | .Account')"
-  mailbox="$(echo "$all_headers" | jq -r --arg id "$msg_id" '.[] | select(.ID == $id) | .Mailbox')"
+while IFS= read -r line; do
+  msg_id="$(echo "$line" | jq -r '.ID')"
+  account="$(echo "$line" | jq -r '.Account')"
+  mailbox="$(echo "$line" | jq -r '.Mailbox')"
 
   ( mail-app-cli messages show "$msg_id" \
       -a "$account" -m "$mailbox" > "$tmpdir/$msg_id.json" 2>/dev/null || echo "{}" > "$tmpdir/$msg_id.json"
   ) &
-done <<< "$selected_ids"
+done < <(echo "$all_headers" | jq -c '.[]')
 wait
 
 all_emails="$(jq -s '.' "$tmpdir"/*.json)"
-email_count="$(echo "$all_emails" | jq 'length')"
 
-# --- Phase 5: Format and summarize (pass 2) ---
+# --- Phase 4: Format and summarize ---
 
 # Truncate each email body to 2000 chars to balance summary quality vs cost
 formatted="$(echo "$all_emails" | jq -r '
@@ -150,23 +123,23 @@ formatted="$(echo "$all_emails" | jq -r '
   "---\nFrom: \(.Sender // "unknown")\nSubject: \(.Subject // "no subject")\nDate: \(.DateReceived // .DateSent // "unknown")\nAccount: \(.Account // "unknown")\n\n\($trimmed)\n"
 ')"
 
-echo "Summarizing $email_count email(s) with Claude ($CLAUDE_MODEL)..."
+echo "Summarizing with Claude ($CLAUDE_MODEL)..."
 
 prompt="$(cat "$SCRIPT_DIR/prompts/summarize.txt")"
 
 summary="$(printf '%s\n\n%s' "$prompt" "$formatted" | claude -p "${claude_args[@]}" 2>/dev/null)"
 
-# --- Phase 6: Write output ---
+# --- Phase 5: Write output ---
 
 {
   echo "# Email Summary - $TODAY"
   echo ""
-  echo "> $email_count of $total_count email(s) summarized from: ${MAIL_ACCOUNTS}."
+  echo "> $total_count email(s) processed from: ${MAIL_ACCOUNTS}."
   echo ""
   echo "$summary"
 } > "$OUTPUT_FILE"
 
-# --- Phase 7: Report ---
+# --- Phase 6: Report ---
 
 echo ""
 echo "Done! Summary written to:"
