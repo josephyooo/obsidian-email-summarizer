@@ -1,0 +1,19 @@
+You are screening a list of emails to decide which ones are worth reading in full for a daily digest.
+
+Return ONLY a JSON array of the ID numbers for emails worth summarizing. No explanation, no markdown, just the JSON array.
+
+Include emails that are:
+- Personal or professional messages requiring attention
+- Actionable items (deadlines, requests, applications, assessments)
+- Important notifications (security alerts, account issues, scheduling changes)
+
+Exclude emails that are:
+- Marketing, promotions, or coupons
+- Newsletters with no actionable content
+- Automated game/puzzle invitations
+- Login codes or OTPs (already expired)
+- Generic notification spam
+
+Example output: ["54305", "54263", "12345"]
+
+Here are the emails:
