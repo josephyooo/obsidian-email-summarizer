@@ -54,39 +54,37 @@ fi
 
 mkdir -p "$OUTPUT_DIR"
 
+tmpdir="$(mktemp -d)"
+trap 'rm -rf "$tmpdir"' EXIT
+
 # --- Phase 2: Fetch emails ---
 
 echo "Fetching emails since $SINCE_DATE..."
 
-all_headers="[]"
 IFS=',' read -ra accounts <<< "$MAIL_ACCOUNTS"
 
+# Fetch headers from all accounts in parallel
 for account in "${accounts[@]}"; do
-  account="$(echo "$account" | xargs)"  # trim whitespace
+  account="$(echo "$account" | xargs)"
 
-  # Detect inbox name: Exchange/Outlook uses "Inbox", Gmail uses "INBOX"
-  mailbox="$MAIL_MAILBOX"
-  if [[ "$mailbox" == "INBOX" ]]; then
-    mailbox="$(mail-app-cli mailboxes list -a "$account" 2>/dev/null \
-      | jq -r '[.[].Name] | if index("INBOX") then "INBOX" elif index("Inbox") then "Inbox" else "INBOX" end')"
-  fi
-
-  echo "  Fetching from: $account / $mailbox"
-
-  result="$(mail-app-cli messages list \
-    -a "$account" \
-    -m "$mailbox" \
-    --since "$SINCE_DATE" \
-    --limit 50 2>/dev/null || echo "[]")"
-
-  msg_count="$(echo "$result" | jq 'length')"
-  if [[ "$msg_count" -eq 0 ]]; then
-    continue
-  fi
-  echo "    Found $msg_count message(s)."
-
-  all_headers="$(echo "$all_headers" "$result" | jq -s '.[0] + .[1]')"
+  ( mailbox="$MAIL_MAILBOX"
+    if [[ "$mailbox" == "INBOX" ]]; then
+      mailbox="$(mail-app-cli mailboxes list -a "$account" 2>/dev/null \
+        | jq -r '[.[].Name] | if index("INBOX") then "INBOX" elif index("Inbox") then "Inbox" else "INBOX" end')"
+    fi
+    echo "  Fetching from: $account / $mailbox" >&2
+    mail-app-cli messages list \
+      -a "$account" \
+      -m "$mailbox" \
+      --since "$SINCE_DATE" \
+      --limit 50 2>/dev/null > "$tmpdir/headers_${account}.json" || echo "[]" > "$tmpdir/headers_${account}.json"
+    cnt="$(jq 'length' "$tmpdir/headers_${account}.json")"
+    [[ "$cnt" -gt 0 ]] && echo "    Found $cnt message(s)." >&2
+  ) &
 done
+wait
+
+all_headers="$(jq -s 'add // []' "$tmpdir"/headers_*.json)"
 
 total_count="$(echo "$all_headers" | jq 'length')"
 
@@ -100,9 +98,6 @@ echo "Found $total_count email(s) total."
 # --- Phase 3: Fetch content (parallel) ---
 
 echo "Fetching content for $total_count email(s)..."
-
-tmpdir="$(mktemp -d)"
-trap 'rm -rf "$tmpdir"' EXIT
 
 while IFS= read -r line; do
   msg_id="$(echo "$line" | jq -r '.ID')"
