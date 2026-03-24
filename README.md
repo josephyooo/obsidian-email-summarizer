@@ -1,17 +1,17 @@
 # obsidian-email-summarizer
 
-A daily email digest for Obsidian, powered by macOS Mail.app and Claude.
+A daily email digest for Obsidian, powered by macOS Mail.app and any LLM CLI.
 
-Fetches emails from all your Mail.app accounts via [`mail-app-cli`](https://github.com/intelligrit/mail-app-cli), screens them for relevance, summarizes with [Claude Code](https://docs.anthropic.com/en/docs/claude-code) in headless mode, and writes a markdown summary to your Obsidian vault.
+Fetches emails from all your Mail.app accounts via [`mail-app-cli`](https://github.com/intelligrit/mail-app-cli), summarizes them with your choice of LLM, and writes a markdown summary to your Obsidian vault.
 
 ```
-mail-app-cli → claude -p (screen) → claude -p (summarize) → sources/email-summary-2026-03-24.md
+mail-app-cli → jq (format) → LLM (filter + summarize) → sources/email-summary-2026-03-24.md
 ```
 
 ## Requirements
 
 - macOS with Mail.app configured (any accounts: Gmail, iCloud, Outlook, etc.)
-- [Claude Code CLI](https://docs.anthropic.com/en/docs/claude-code)
+- An LLM CLI tool (see [Supported LLM tools](#supported-llm-tools) below)
 - [Go](https://go.dev/) (for building mail-app-cli)
 - [jq](https://jqlang.github.io/jq/) (likely already installed on macOS)
 - Full Disk Access for Terminal (System Settings > Privacy & Security)
@@ -49,14 +49,34 @@ Edit `.env` (created by `install.sh` from `.env.example`):
 | `MAIL_SINCE_DAYS` | `1` | How many days back to look |
 | `VAULT_PATH` | *(required)* | Absolute path to your Obsidian vault |
 | `SOURCES_DIR` | `sources` | Output subdirectory within the vault |
-| `CLAUDE_MODEL` | `haiku` | Claude model (`haiku`, `sonnet`, `opus`) |
-| `CLAUDE_MAX_BUDGET` | `0.50` | Max spend per run in USD (omit to disable) |
+| `LLM_CMD` | Claude Haiku | LLM command template (see below) |
 
 To find your account names:
 
 ```bash
 mail-app-cli accounts list
 ```
+
+## Supported LLM tools
+
+Set `LLM_CMD` in `.env` using `{input}` and `{output}` as placeholders for temp file paths. The script writes the prompt to `{input}` and reads the summary from `{output}`.
+
+**Claude Code** (default):
+```bash
+LLM_CMD="claude -p --model claude-haiku-4-5-20251001 --effort medium --no-session-persistence < {input} > {output}"
+```
+
+**OpenAI Codex CLI**:
+```bash
+LLM_CMD="codex e -m gpt-5.4-mini --skip-git-repo-check --ephemeral -c model_reasoning_effort='\"low\"' -o {output} < {input}"
+```
+
+**pi** ([badlogic/pi-mono](https://github.com/badlogic/pi-mono)):
+```bash
+LLM_CMD="pi -p --model gpt-5.4-mini --provider openai-codex --thinking medium --no-session --no-extensions < {input} > {output}"
+```
+
+Any CLI that can read a prompt from a file and write a response to a file will work.
 
 ## Output
 
@@ -65,7 +85,7 @@ Each run produces a file like `sources/email-summary-2026-03-24.md`:
 ```markdown
 # Email Summary - 2026-03-24
 
-> 12 of 35 email(s) summarized from: Work,Personal.
+> 35 email(s) processed from: Work,Personal.
 
 ## Work
 
@@ -88,15 +108,12 @@ Round trip to Denver confirmed for April 10-13. Confirmation code: ABC123.
 
 ## How It Works
 
-The script uses a **two-pass approach** to keep costs low and summaries focused:
-
 1. **Fetch headers**: `mail-app-cli` lists recent emails from all accounts (fast, no content)
-2. **Screen** (pass 1): Subject lines and senders are sent to `claude -p`, which returns IDs of emails worth reading — filtering out marketing, newsletters, OTPs, and spam
-3. **Fetch content**: Only selected emails have their full body fetched via `mail-app-cli messages show`
-4. **Summarize** (pass 2): Full email content is sent to `claude -p` with the summarization prompt
-5. **Write**: The summary is saved as a dated markdown file in your vault's `sources/` directory
+2. **Fetch content**: Full email bodies are fetched in parallel via `mail-app-cli messages show`
+3. **Summarize**: All emails are sent to the LLM in a single pass — it filters out spam/newsletters and summarizes the rest with action items
+4. **Write**: The summary is saved as a dated markdown file in your vault's `sources/` directory
 
-The screening prompts live in `prompts/screen.txt` and `prompts/summarize.txt` — edit them to tune what gets included and how summaries are formatted.
+Edit `prompts/summarize.txt` to tune what gets filtered and how summaries are formatted.
 
 The script is idempotent — running it twice in one day overwrites the same file. It also auto-detects inbox naming differences between Gmail (`INBOX`) and Exchange/Outlook (`Inbox`).
 
@@ -160,8 +177,8 @@ Grant Full Disk Access to Terminal in System Settings > Privacy & Security > Ful
 **No emails found**
 Check your account names match exactly (`mail-app-cli accounts list`) and that `MAIL_SINCE_DAYS` covers a recent enough window.
 
-**Claude errors**
-Ensure the Claude CLI is authenticated (`claude` in interactive mode first).
+**LLM errors**
+Ensure your LLM CLI is authenticated (e.g., run `claude` interactively first, or check your API key for codex/pi).
 
 ## License
 
