@@ -23,11 +23,13 @@ MAIL_MAILBOX="${MAIL_MAILBOX:-INBOX}"
 MAIL_SINCE_DAYS="${MAIL_SINCE_DAYS:-1}"
 VAULT_PATH="${VAULT_PATH:?Error: VAULT_PATH is required in .env}"
 SOURCES_DIR="${SOURCES_DIR:-sources}"
-# LLM command: receives prompt on stdin, writes summary to stdout
+# LLM command template: use {input} and {output} as placeholders for file paths.
+# The script writes the prompt to {input} and reads the summary from {output}.
 # Examples:
-#   claude --model claude-haiku-4-5-20251001 --effort medium --no-session-persistence -p
-#   pi --model gpt-5.4-mini --provider openai-codex --thinking medium --no-session --no-themes -p
-LLM_CMD="${LLM_CMD:-claude --model claude-haiku-4-5-20251001 --effort medium --no-session-persistence -p}"
+#   claude -p --model claude-haiku-4-5-20251001 --effort medium --no-session-persistence < {input} > {output}
+#   codex e -m gpt-5.4-mini --skip-git-repo-check --ephemeral -c model_reasoning_effort='"low"' -o {output} < {input}
+#   pi -p --model gpt-5.4-mini --provider openai-codex --thinking medium --no-session --no-extensions < {input} > {output}
+LLM_CMD="${LLM_CMD:-claude -p --model claude-haiku-4-5-20251001 --effort medium --no-session-persistence < {input} > {output}}"
 
 TODAY="$(date +%Y-%m-%d)"
 SINCE_DATE="$(date -v-"${MAIL_SINCE_DAYS}"d +%Y-%m-%d)"
@@ -36,6 +38,7 @@ OUTPUT_FILE="$OUTPUT_DIR/email-summary-$TODAY.md"
 
 # --- Phase 1: Preflight checks ---
 
+# Extract the first real command from LLM_CMD (skip shell redirects)
 llm_bin="$(echo "$LLM_CMD" | awk '{print $1}')"
 for cmd in mail-app-cli "$llm_bin" jq; do
   if ! command -v "$cmd" &>/dev/null; then
@@ -124,11 +127,17 @@ formatted="$(echo "$all_emails" | jq -r '
   "---\nFrom: \(.Sender // "unknown")\nSubject: \(.Subject // "no subject")\nDate: \(.DateReceived // .DateSent // "unknown")\nAccount: \(.Account // "unknown")\n\n\($trimmed)\n"
 ')"
 
-echo "Summarizing with: $LLM_CMD"
+echo "Summarizing with: $(echo "$LLM_CMD" | awk '{print $1}')"
 
 prompt="$(cat "$SCRIPT_DIR/prompts/summarize.txt")"
 
-summary="$(printf '%s\n\n%s' "$prompt" "$formatted" | $LLM_CMD 2>/dev/null)"
+printf '%s\n\n%s' "$prompt" "$formatted" > "$tmpdir/prompt.txt"
+
+llm_cmd="${LLM_CMD//\{input\}/$tmpdir/prompt.txt}"
+llm_cmd="${llm_cmd//\{output\}/$tmpdir/response.txt}"
+eval "$llm_cmd" 2>/dev/null
+
+summary="$(cat "$tmpdir/response.txt")"
 
 # --- Phase 5: Write output ---
 
