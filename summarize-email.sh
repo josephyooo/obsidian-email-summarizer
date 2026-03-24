@@ -124,17 +124,20 @@ echo "Selected $selected_count of $total_count email(s) for full summarization."
 
 echo "Fetching content for selected emails..."
 
-all_emails="[]"
+tmpdir="$(mktemp -d)"
+trap 'rm -rf "$tmpdir"' EXIT
+
 while IFS= read -r msg_id; do
-  # Look up which account/mailbox this message belongs to
   account="$(echo "$all_headers" | jq -r --arg id "$msg_id" '.[] | select(.ID == $id) | .Account')"
   mailbox="$(echo "$all_headers" | jq -r --arg id "$msg_id" '.[] | select(.ID == $id) | .Mailbox')"
 
-  detail="$(mail-app-cli messages show "$msg_id" \
-    -a "$account" -m "$mailbox" 2>/dev/null || echo "{}")"
-  all_emails="$(echo "$all_emails" "[$detail]" | jq -s '.[0] + .[1]')"
+  ( mail-app-cli messages show "$msg_id" \
+      -a "$account" -m "$mailbox" > "$tmpdir/$msg_id.json" 2>/dev/null || echo "{}" > "$tmpdir/$msg_id.json"
+  ) &
 done <<< "$selected_ids"
+wait
 
+all_emails="$(jq -s '.' "$tmpdir"/*.json)"
 email_count="$(echo "$all_emails" | jq 'length')"
 
 # --- Phase 5: Format and summarize (pass 2) ---
