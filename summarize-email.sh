@@ -115,7 +115,17 @@ while IFS= read -r line; do
 done < <(echo "$all_headers" | jq -c '.[]')
 wait
 
-all_emails="$(jq -s '.' "$tmpdir"/*.json)"
+# Merge JSON files, sanitizing control characters that some emails contain
+all_emails="$(python3 -c "
+import json, glob, sys, re
+emails = []
+for f in sorted(glob.glob(sys.argv[1] + '/*.json')):
+    raw = open(f, 'rb').read().decode('utf-8', errors='replace')
+    raw = re.sub(r'[\x00-\x08\x0b\x0c\x0e-\x1f]', '', raw)
+    try: emails.append(json.loads(raw))
+    except json.JSONDecodeError: pass
+json.dump(emails, sys.stdout)
+" "$tmpdir")"
 
 # --- Phase 4: Format and summarize ---
 
