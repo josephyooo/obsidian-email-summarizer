@@ -1,5 +1,7 @@
 # obsidian-email-summarizer
 
+> **Note**: This project was built entirely with [Claude Code](https://claude.ai/claude-code) (Claude Opus 4.6). The code, prompts, documentation, and commit messages were all AI-generated with human direction and review.
+
 A daily email digest for Obsidian, powered by macOS Mail.app and any LLM CLI.
 
 Fetches emails from all your Mail.app accounts via AppleScript, summarizes them with your choice of LLM, and writes a markdown summary to your Obsidian vault.
