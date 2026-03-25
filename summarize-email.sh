@@ -12,20 +12,20 @@ export PATH="/opt/homebrew/bin:/usr/local/bin:$PATH"
 
 # --- Phase 0: Configuration ---
 
-# Source .env but don't override already-set env vars
 if [[ -f "$SCRIPT_DIR/.env" ]]; then
-  while IFS='=' read -r key val; do
-    [[ "$key" =~ ^#.*$ || -z "$key" ]] && continue
-    val="${val%\"}" && val="${val#\"}"  # strip quotes
-    [[ -z "${!key:-}" ]] && export "$key=$val"
-  done < "$SCRIPT_DIR/.env"
+  # shellcheck source=/dev/null
+  source "$SCRIPT_DIR/.env"
 fi
 
 MAIL_ACCOUNTS="${MAIL_ACCOUNTS:?Error: MAIL_ACCOUNTS is required in .env}"
 MAIL_SINCE_DAYS="${MAIL_SINCE_DAYS:-1}"
 VAULT_PATH="${VAULT_PATH:?Error: VAULT_PATH is required in .env}"
 SOURCES_DIR="${SOURCES_DIR:-sources}"
-LLM_CMD="${LLM_CMD:-claude -p --model claude-haiku-4-5-20251001 --effort medium --no-session-persistence < {input} > {output}}"
+# LLM command: reads prompt from stdin, writes summary to stdout.
+# Examples:
+#   claude -p --model claude-sonnet-4-6 --effort high --no-session-persistence
+#   codex e -m gpt-5.4-mini --skip-git-repo-check --ephemeral -o /dev/stdout
+LLM_CMD="${LLM_CMD:-claude -p --model claude-sonnet-4-6 --effort high --no-session-persistence}"
 
 TODAY="$(date +%Y-%m-%d)"
 OUTPUT_DIR="$VAULT_PATH/$SOURCES_DIR"
@@ -114,14 +114,11 @@ echo "Found $email_count email(s)."
 
 # --- Phase 3: Summarize ---
 
-echo "Summarizing with: $(echo "$LLM_CMD" | awk '{print $1}')"
+echo "Summarizing with: $llm_bin"
 
 cat "$SCRIPT_DIR/prompts/summarize.txt" "$tmpdir/clean_emails.txt" > "$tmpdir/prompt.txt"
 
-llm_cmd="${LLM_CMD//\{input\}/$tmpdir/prompt.txt}"
-llm_cmd="${llm_cmd//\{output\}/$tmpdir/response.txt}"
-eval "$llm_cmd"
-summary="$(cat "$tmpdir/response.txt")"
+summary="$($LLM_CMD < "$tmpdir/prompt.txt")"
 
 # --- Phase 4: Write output ---
 
