@@ -1,0 +1,10 @@
+# https://code.claude.com/docs/en/cli-reference
+# effort options: low, medium, high
+claude --model claude-haiku-4-5-20251001 --effort medium --no-session-persistence -p "<query>"
+# https://github.com/badlogic/pi-mono/tree/main/packages/coding-agent#cli-reference
+# thinking options: off, minimal, low, medium, high, xhigh
+pi --model gpt-5.4-mini --provider openai-codex --thinking medium --no-session --no-themes --no-extensions -p "<query>"
+pi --model claude-haiku-4-5-20251001 --provider anthropic --thinking medium --no-session --no-themes --no-extensions -p "<query>"
+# https://developers.openai.com/codex/cli/reference
+# low, medium, high, xhigh
+codex e -m gpt-5.4-mini --skip-git-repo-check -c model_reasoning_effort='"low"' --ephemeral -o "<query>"
