@@ -2,18 +2,16 @@
 
 A daily email digest for Obsidian, powered by macOS Mail.app and any LLM CLI.
 
-Fetches emails from all your Mail.app accounts via [`mail-app-cli`](https://github.com/intelligrit/mail-app-cli), summarizes them with your choice of LLM, and writes a markdown summary to your Obsidian vault.
+Fetches emails from all your Mail.app accounts via AppleScript, summarizes them with your choice of LLM, and writes a markdown summary to your Obsidian vault.
 
 ```
-mail-app-cli → jq (format) → LLM (filter + summarize) → sources/email-summary-2026-03-24.md
+Mail.app (AppleScript) → LLM (filter + summarize) → sources/email-summary-2026-03-24.md
 ```
 
 ## Requirements
 
 - macOS with Mail.app configured (any accounts: Gmail, iCloud, Outlook, etc.)
 - An LLM CLI tool (see [Supported LLM tools](#supported-llm-tools) below)
-- [Go](https://go.dev/) (for building mail-app-cli)
-- [jq](https://jqlang.github.io/jq/) (likely already installed on macOS)
 - Full Disk Access for Terminal (System Settings > Privacy & Security)
 
 ## Quick Start
@@ -22,7 +20,7 @@ mail-app-cli → jq (format) → LLM (filter + summarize) → sources/email-summ
 git clone https://github.com/youruser/obsidian-email-summarizer.git
 cd obsidian-email-summarizer
 
-# Install dependencies (Go, mail-app-cli)
+# Check dependencies and list your Mail.app accounts
 ./install.sh
 
 # Edit configuration
@@ -45,38 +43,33 @@ Edit `.env` (created by `install.sh` from `.env.example`):
 | Variable | Default | Description |
 |---|---|---|
 | `MAIL_ACCOUNTS` | *(required)* | Comma-separated Mail.app account names |
-| `MAIL_MAILBOX` | `INBOX` | Mailbox to fetch from (auto-detects `Inbox` for Exchange) |
 | `MAIL_SINCE_DAYS` | `1` | How many days back to look |
 | `VAULT_PATH` | *(required)* | Absolute path to your Obsidian vault |
 | `SOURCES_DIR` | `sources` | Output subdirectory within the vault |
-| `LLM_CMD` | Claude Haiku | LLM command template (see below) |
+| `LLM_CMD` | Claude Sonnet | LLM command (see below) |
 
-To find your account names:
-
-```bash
-mail-app-cli accounts list
-```
+To find your account names, run `./install.sh` — it lists all Mail.app accounts.
 
 ## Supported LLM tools
 
-Set `LLM_CMD` in `.env` using `{input}` and `{output}` as placeholders for temp file paths. The script writes the prompt to `{input}` and reads the summary from `{output}`.
+Set `LLM_CMD` in `.env`. The command must read a prompt from **stdin** and write the summary to **stdout**.
 
 **Claude Code** (default):
 ```bash
-LLM_CMD="claude -p --model claude-haiku-4-5-20251001 --effort medium --no-session-persistence < {input} > {output}"
+LLM_CMD="claude -p --model claude-sonnet-4-6 --effort high --no-session-persistence"
+```
+
+**Claude Code (faster, cheaper)**:
+```bash
+LLM_CMD="claude -p --model claude-haiku-4-5-20251001 --effort medium --no-session-persistence"
 ```
 
 **OpenAI Codex CLI**:
 ```bash
-LLM_CMD="codex e -m gpt-5.4-mini --skip-git-repo-check --ephemeral -c model_reasoning_effort='\"low\"' -o {output} < {input}"
+LLM_CMD="codex e -m gpt-5.4-mini --skip-git-repo-check --ephemeral -o /dev/stdout"
 ```
 
-**pi** ([badlogic/pi-mono](https://github.com/badlogic/pi-mono)):
-```bash
-LLM_CMD="pi -p --model gpt-5.4-mini --provider openai-codex --thinking medium --no-session --no-extensions < {input} > {output}"
-```
-
-Any CLI that can read a prompt from a file and write a response to a file will work.
+Any CLI that reads from stdin and writes to stdout will work.
 
 ## Output
 
@@ -108,14 +101,14 @@ Round trip to Denver confirmed for April 10-13. Confirmation code: ABC123.
 
 ## How It Works
 
-1. **Fetch headers**: `mail-app-cli` lists recent emails from all accounts (fast, no content)
-2. **Fetch content**: Full email bodies are fetched in parallel via `mail-app-cli messages show`
+1. **Fetch**: A single AppleScript call retrieves recent emails from all configured accounts using Mail.app's `whose date received` filter (fast, server-side filtering)
+2. **Sanitize**: Control characters are stripped from email content
 3. **Summarize**: All emails are sent to the LLM in a single pass — it filters out spam/newsletters and summarizes the rest with action items
 4. **Write**: The summary is saved as a dated markdown file in your vault's `sources/` directory
 
 Edit `prompts/summarize.txt` to tune what gets filtered and how summaries are formatted.
 
-The script is idempotent — running it twice in one day overwrites the same file. It also auto-detects inbox naming differences between Gmail (`INBOX`) and Exchange/Outlook (`Inbox`).
+The script is idempotent — running it twice in one day overwrites the same file. It auto-detects inbox naming differences between Gmail (`INBOX`) and Exchange/Outlook (`Inbox`).
 
 ## Automation
 
@@ -133,7 +126,7 @@ Create `~/Library/LaunchAgents/com.user.email-summarizer.plist`:
     <string>com.user.email-summarizer</string>
     <key>ProgramArguments</key>
     <array>
-        <string>/Users/you/Projects/obsidian-email-summarizer/summarize-email.sh</string>
+        <string>/path/to/obsidian-email-summarizer/summarize-email.sh</string>
     </array>
     <key>StartCalendarInterval</key>
     <dict>
@@ -168,17 +161,14 @@ Note: launchd handles macOS sleep/wake better than cron.
 
 ## Troubleshooting
 
-**"mail-app-cli not found"**
-Run `./install.sh` or ensure `~/go/bin` is in your PATH.
-
 **"Could not access Mail.app"**
 Grant Full Disk Access to Terminal in System Settings > Privacy & Security > Full Disk Access.
 
 **No emails found**
-Check your account names match exactly (`mail-app-cli accounts list`) and that `MAIL_SINCE_DAYS` covers a recent enough window.
+Check your account names match exactly (run `./install.sh` to list them) and that `MAIL_SINCE_DAYS` covers a recent enough window.
 
-**LLM errors**
-Ensure your LLM CLI is authenticated (e.g., run `claude` interactively first, or check your API key for codex/pi).
+**Empty summary**
+Ensure your LLM CLI is authenticated (e.g., run `claude` interactively first, or check your API key for codex).
 
 ## License
 
