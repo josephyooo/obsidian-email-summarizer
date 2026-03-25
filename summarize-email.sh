@@ -3,46 +3,40 @@ set -euo pipefail
 
 # =============================================================================
 # obsidian-email-summarizer
-# Fetches emails via mail-app-cli, summarizes with Claude, writes to Obsidian.
+# Fetches emails via AppleScript, summarizes with an LLM, writes to Obsidian.
 # =============================================================================
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
-# Ensure go binaries and common paths are available (needed for cron/launchd)
-export PATH="$HOME/go/bin:/opt/homebrew/bin:/usr/local/bin:$PATH"
+export PATH="/opt/homebrew/bin:/usr/local/bin:$PATH"
 
 # --- Phase 0: Configuration ---
 
+# Source .env but don't override already-set env vars
 if [[ -f "$SCRIPT_DIR/.env" ]]; then
-  # shellcheck source=/dev/null
-  source "$SCRIPT_DIR/.env"
+  while IFS='=' read -r key val; do
+    [[ "$key" =~ ^#.*$ || -z "$key" ]] && continue
+    val="${val%\"}" && val="${val#\"}"  # strip quotes
+    [[ -z "${!key:-}" ]] && export "$key=$val"
+  done < "$SCRIPT_DIR/.env"
 fi
 
 MAIL_ACCOUNTS="${MAIL_ACCOUNTS:?Error: MAIL_ACCOUNTS is required in .env}"
-MAIL_MAILBOX="${MAIL_MAILBOX:-INBOX}"
 MAIL_SINCE_DAYS="${MAIL_SINCE_DAYS:-1}"
 VAULT_PATH="${VAULT_PATH:?Error: VAULT_PATH is required in .env}"
 SOURCES_DIR="${SOURCES_DIR:-sources}"
-# LLM command template: use {input} and {output} as placeholders for file paths.
-# The script writes the prompt to {input} and reads the summary from {output}.
-# Examples:
-#   claude -p --model claude-haiku-4-5-20251001 --effort medium --no-session-persistence < {input} > {output}
-#   codex e -m gpt-5.4-mini --skip-git-repo-check --ephemeral -c model_reasoning_effort='"low"' -o {output} < {input}
-#   pi -p --model gpt-5.4-mini --provider openai-codex --thinking medium --no-session --no-extensions < {input} > {output}
 LLM_CMD="${LLM_CMD:-claude -p --model claude-haiku-4-5-20251001 --effort medium --no-session-persistence < {input} > {output}}"
 
 TODAY="$(date +%Y-%m-%d)"
-SINCE_DATE="$(date -v-"${MAIL_SINCE_DAYS}"d +%Y-%m-%d)"
 OUTPUT_DIR="$VAULT_PATH/$SOURCES_DIR"
 OUTPUT_FILE="$OUTPUT_DIR/email-summary-$TODAY.md"
 
 # --- Phase 1: Preflight checks ---
 
-# Extract the first real command from LLM_CMD (skip shell redirects)
 llm_bin="$(echo "$LLM_CMD" | awk '{print $1}')"
-for cmd in mail-app-cli "$llm_bin" jq; do
+for cmd in "$llm_bin" python3; do
   if ! command -v "$cmd" &>/dev/null; then
-    echo "Error: '$cmd' not found in PATH. Run install.sh or install it manually." >&2
+    echo "Error: '$cmd' not found in PATH." >&2
     exit 1
   fi
 done
@@ -57,104 +51,89 @@ mkdir -p "$OUTPUT_DIR"
 tmpdir="$(mktemp -d)"
 trap 'rm -rf "$tmpdir"' EXIT
 
-# --- Phase 2: Fetch emails ---
+# --- Phase 2: Fetch emails via AppleScript ---
 
-echo "Fetching emails since $SINCE_DATE..."
+echo "Fetching emails from last $MAIL_SINCE_DAYS day(s)..."
 
+# Build AppleScript account list
 IFS=',' read -ra accounts <<< "$MAIL_ACCOUNTS"
-
-# Fetch headers from all accounts in parallel
-for account in "${accounts[@]}"; do
-  account="$(echo "$account" | xargs)"
-
-  ( mailbox="$MAIL_MAILBOX"
-    if [[ "$mailbox" == "INBOX" ]]; then
-      mailbox="$(mail-app-cli mailboxes list -a "$account" 2>/dev/null \
-        | jq -r '[.[].Name] | if index("INBOX") then "INBOX" elif index("Inbox") then "Inbox" else "INBOX" end')"
-    fi
-    echo "  Fetching from: $account / $mailbox" >&2
-    mail-app-cli messages list \
-      -a "$account" \
-      -m "$mailbox" \
-      --since "$SINCE_DATE" \
-      --limit 50 2>/dev/null > "$tmpdir/headers_${account}.json" || echo "[]" > "$tmpdir/headers_${account}.json"
-    cnt="$(jq 'length' "$tmpdir/headers_${account}.json")"
-    [[ "$cnt" -gt 0 ]] && echo "    Found $cnt message(s)." >&2
-  ) &
+as_accounts=""
+for a in "${accounts[@]}"; do
+  a="$(echo "$a" | xargs)"
+  as_accounts="${as_accounts}\"${a}\", "
 done
-wait
+as_accounts="{${as_accounts%, }}"
 
-all_headers="$(jq -s 'add // []' "$tmpdir"/headers_*.json)"
+# Single AppleScript call: fetch headers + content for all accounts
+# Uses 'whose date received' for fast server-side filtering
+osascript -e "
+tell application \"Mail\"
+  set cutoff to (current date) - ${MAIL_SINCE_DAYS} * days
+  set output to \"\"
+  set accts to ${as_accounts}
+  repeat with acctName in accts
+    set acct to account acctName
+    -- auto-detect inbox name (Gmail=INBOX, Exchange=Inbox)
+    set mbox to missing value
+    repeat with mb in mailboxes of acct
+      if name of mb is \"INBOX\" or name of mb is \"Inbox\" then
+        set mbox to mb
+        exit repeat
+      end if
+    end repeat
+    if mbox is missing value then
+      -- skip account if no inbox found
+    else
+      set msgs to (messages of mbox whose date received > cutoff)
+      repeat with m in msgs
+        set subj to subject of m
+        set sndr to sender of m
+        set dt to date received of m as string
+        set cont to content of m
+        if length of cont > 2000 then
+          set cont to text 1 thru 2000 of cont
+        end if
+        set output to output & \"ACCOUNT:\" & acctName & \"\\nFROM:\" & sndr & \"\\nSUBJECT:\" & subj & \"\\nDATE:\" & dt & \"\\nCONTENT:\" & cont & \"\\n---END---\\n\"
+      end repeat
+    end if
+  end repeat
+  return output
+end tell" 2>/dev/null > "$tmpdir/raw_emails.txt"
 
-total_count="$(echo "$all_headers" | jq 'length')"
+# Sanitize control characters from email content
+LC_ALL=C tr -cd '[:print:][:space:]' < "$tmpdir/raw_emails.txt" > "$tmpdir/clean_emails.txt"
 
-if [[ "$total_count" -eq 0 ]]; then
-  echo "No emails found since $SINCE_DATE. Nothing to summarize."
+email_count="$(grep -c '^---END---$' "$tmpdir/clean_emails.txt" || echo 0)"
+
+if [[ "$email_count" -eq 0 ]]; then
+  echo "No emails found. Nothing to summarize."
   exit 0
 fi
 
-echo "Found $total_count email(s) total."
+echo "Found $email_count email(s)."
 
-# --- Phase 3: Fetch content (parallel) ---
-
-echo "Fetching content for $total_count email(s)..."
-
-while IFS= read -r line; do
-  msg_id="$(echo "$line" | jq -r '.ID')"
-  account="$(echo "$line" | jq -r '.Account')"
-  mailbox="$(echo "$line" | jq -r '.Mailbox')"
-
-  ( mail-app-cli messages show "$msg_id" \
-      -a "$account" -m "$mailbox" > "$tmpdir/$msg_id.json" 2>/dev/null || echo "{}" > "$tmpdir/$msg_id.json"
-  ) &
-done < <(echo "$all_headers" | jq -c '.[]')
-wait
-
-# Merge JSON files, sanitizing control characters that some emails contain
-all_emails="$(python3 -c "
-import json, glob, sys, re
-emails = []
-for f in sorted(glob.glob(sys.argv[1] + '/*.json')):
-    raw = open(f, 'rb').read().decode('utf-8', errors='replace')
-    raw = re.sub(r'[\x00-\x08\x0b\x0c\x0e-\x1f]', '', raw)
-    try: emails.append(json.loads(raw))
-    except json.JSONDecodeError: pass
-json.dump(emails, sys.stdout)
-" "$tmpdir")"
-
-# --- Phase 4: Format and summarize ---
-
-# Truncate each email body to 2000 chars to balance summary quality vs cost
-formatted="$(echo "$all_emails" | jq -r '
-  .[] |
-  (.Content // "(no body)") as $body |
-  ($body | if length > 2000 then .[:2000] + "..." else . end) as $trimmed |
-  "---\nFrom: \(.Sender // "unknown")\nSubject: \(.Subject // "no subject")\nDate: \(.DateReceived // .DateSent // "unknown")\nAccount: \(.Account // "unknown")\n\n\($trimmed)\n"
-')"
+# --- Phase 3: Summarize ---
 
 echo "Summarizing with: $(echo "$LLM_CMD" | awk '{print $1}')"
 
-prompt="$(cat "$SCRIPT_DIR/prompts/summarize.txt")"
-
-printf '%s\n\n%s' "$prompt" "$formatted" > "$tmpdir/prompt.txt"
+cat "$SCRIPT_DIR/prompts/summarize.txt" "$tmpdir/clean_emails.txt" > "$tmpdir/prompt.txt"
 
 llm_cmd="${LLM_CMD//\{input\}/$tmpdir/prompt.txt}"
 llm_cmd="${llm_cmd//\{output\}/$tmpdir/response.txt}"
-eval "$llm_cmd" 2>/dev/null
-
+eval "$llm_cmd"
 summary="$(cat "$tmpdir/response.txt")"
 
-# --- Phase 5: Write output ---
+# --- Phase 4: Write output ---
 
 {
   echo "# Email Summary - $TODAY"
   echo ""
-  echo "> $total_count email(s) processed from: ${MAIL_ACCOUNTS}."
+  echo "> $email_count email(s) processed from: ${MAIL_ACCOUNTS}."
   echo ""
   echo "$summary"
 } > "$OUTPUT_FILE"
 
-# --- Phase 6: Report ---
+# --- Phase 5: Report ---
 
 echo ""
 echo "Done! Summary written to:"

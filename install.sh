@@ -6,55 +6,25 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 echo "=== obsidian-email-summarizer setup ==="
 echo ""
 
-# --- Check/install Go ---
+# --- Check dependencies ---
 
-if command -v go &>/dev/null; then
-  echo "[ok] Go is installed: $(go version)"
+if command -v python3 &>/dev/null; then
+  echo "[ok] python3 is installed: $(python3 --version 2>&1)"
 else
-  echo "[..] Go not found. Installing via Homebrew..."
-  if ! command -v brew &>/dev/null; then
-    echo "Error: Homebrew not found. Install Go manually: https://go.dev/dl/" >&2
-    exit 1
-  fi
-  brew install go
-  echo "[ok] Go installed."
-fi
-
-# --- Install mail-app-cli ---
-
-if command -v mail-app-cli &>/dev/null; then
-  echo "[ok] mail-app-cli is installed."
-else
-  echo "[..] Installing mail-app-cli..."
-  go install github.com/intelligrit/mail-app-cli@latest
-
-  # Check if ~/go/bin is in PATH
-  if ! command -v mail-app-cli &>/dev/null; then
-    echo ""
-    echo "mail-app-cli was installed to ~/go/bin/ but it's not in your PATH."
-    echo "Add this to your ~/.zshrc:"
-    echo ""
-    echo '  export PATH="$HOME/go/bin:$PATH"'
-    echo ""
-    echo "Then restart your terminal or run: source ~/.zshrc"
-    exit 1
-  fi
-  echo "[ok] mail-app-cli installed."
-fi
-
-# --- Check other dependencies ---
-
-if command -v claude &>/dev/null; then
-  echo "[ok] Claude CLI is installed."
-else
-  echo "[!!] Claude CLI not found. Install it: https://docs.anthropic.com/en/docs/claude-code" >&2
+  echo "[!!] python3 not found." >&2
   exit 1
 fi
 
-if command -v jq &>/dev/null; then
-  echo "[ok] jq is installed."
-else
-  echo "[!!] jq not found. Install it: brew install jq" >&2
+# Check for an LLM CLI (at least one should be available)
+found_llm=false
+for cmd in claude codex pi; do
+  if command -v "$cmd" &>/dev/null; then
+    echo "[ok] $cmd is installed."
+    found_llm=true
+  fi
+done
+if [[ "$found_llm" == "false" ]]; then
+  echo "[!!] No LLM CLI found. Install one of: claude, codex, or pi." >&2
   exit 1
 fi
 
@@ -72,10 +42,16 @@ fi
 # --- Verify Mail.app access ---
 
 echo ""
-echo "Testing mail-app-cli access to Mail.app..."
-if mail-app-cli accounts list &>/dev/null; then
+echo "Testing Mail.app access via AppleScript..."
+if osascript -e 'tell application "Mail" to get name of accounts' &>/dev/null; then
   echo "[ok] Mail.app is accessible. Available accounts:"
-  mail-app-cli accounts list 2>/dev/null | jq -r '.[].name // .[].email // .'
+  osascript -e 'tell application "Mail"
+    set output to ""
+    repeat with a in accounts
+      set output to output & "  - " & name of a & " (" & email addresses of a & ")" & "\n"
+    end repeat
+    return output
+  end tell' 2>/dev/null
 else
   echo "[!!] Could not access Mail.app."
   echo "     Grant Full Disk Access to Terminal in:"
