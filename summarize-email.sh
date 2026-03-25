@@ -20,7 +20,7 @@ fi
 MAIL_ACCOUNTS="${MAIL_ACCOUNTS:?Error: MAIL_ACCOUNTS is required in .env}"
 MAIL_SINCE_DAYS="${MAIL_SINCE_DAYS:-1}"
 VAULT_PATH="${VAULT_PATH:?Error: VAULT_PATH is required in .env}"
-SOURCES_DIR="${SOURCES_DIR:-sources}"
+OUTPUT_DIR="${OUTPUT_DIR:-sources}"
 # LLM command: reads prompt from stdin, writes summary to stdout.
 # Examples:
 #   claude -p --model claude-sonnet-4-6 --effort high --no-session-persistence
@@ -28,7 +28,7 @@ SOURCES_DIR="${SOURCES_DIR:-sources}"
 LLM_CMD="${LLM_CMD:-claude -p --model claude-sonnet-4-6 --effort high --no-session-persistence}"
 
 TODAY="$(date +%Y-%m-%d)"
-OUTPUT_DIR="$VAULT_PATH/$SOURCES_DIR"
+OUTPUT_DIR="$VAULT_PATH/$OUTPUT_DIR"
 OUTPUT_FILE="$OUTPUT_DIR/email-summary-$TODAY.md"
 
 # --- Phase 1: Preflight checks ---

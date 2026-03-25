@@ -1,6 +1,6 @@
 # obsidian-email-summarizer
 
-> **Note**: This project was built entirely with [Claude Code](https://claude.ai/claude-code) (Claude Opus 4.6). The code, prompts, documentation, and commit messages were all AI-generated with human direction and review.
+> **Note**: This project was built entirely with [Claude Code](https://claude.ai/claude-code). Code, prompts, documentation, and commit messages were AI-generated with human direction and review.
 
 A daily email digest for Obsidian, powered by macOS Mail.app and any LLM CLI.
 
@@ -19,11 +19,11 @@ Mail.app (AppleScript) → LLM (filter + summarize) → sources/email-summary-20
 ## Quick Start
 
 ```bash
-git clone https://github.com/youruser/obsidian-email-summarizer.git
+git clone https://github.com/josephyooo/obsidian-email-summarizer.git
 cd obsidian-email-summarizer
 
 # Check dependencies and list your Mail.app accounts
-./install.sh
+./setup.sh
 
 # Edit configuration
 $EDITOR .env
@@ -40,17 +40,17 @@ Then link from your Obsidian daily note:
 
 ## Configuration
 
-Edit `.env` (created by `install.sh` from `.env.example`):
+Edit `.env` (created by `setup.sh` from `.env.example`):
 
 | Variable | Default | Description |
 |---|---|---|
 | `MAIL_ACCOUNTS` | *(required)* | Comma-separated Mail.app account names |
 | `MAIL_SINCE_DAYS` | `1` | How many days back to look |
 | `VAULT_PATH` | *(required)* | Absolute path to your Obsidian vault |
-| `SOURCES_DIR` | `sources` | Output subdirectory within the vault |
+| `OUTPUT_DIR` | `sources` | Output subdirectory within the vault |
 | `LLM_CMD` | Claude Sonnet | LLM command (see below) |
 
-To find your account names, run `./install.sh` — it lists all Mail.app accounts.
+To find your account names, run `./setup.sh` — it lists all Mail.app accounts.
 
 ## Supported LLM tools
 
@@ -167,7 +167,7 @@ Note: launchd handles macOS sleep/wake better than cron.
 Grant Full Disk Access to Terminal in System Settings > Privacy & Security > Full Disk Access.
 
 **No emails found**
-Check your account names match exactly (run `./install.sh` to list them) and that `MAIL_SINCE_DAYS` covers a recent enough window.
+Check your account names match exactly (run `./setup.sh` to list them) and that `MAIL_SINCE_DAYS` covers a recent enough window.
 
 **Empty summary**
 Ensure your LLM CLI is authenticated (e.g., run `claude` interactively first, or check your API key for codex).
